@@ -2,11 +2,12 @@ import os
 import typing
 from typing import Optional
 
+
 from sklearn.gaussian_process.kernels import *
 import numpy as np
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import KFold
+# from sklearn.gaussian_process import GaussianProcessRegressor
+# from sklearn.model_selection import cross_val_score
+# from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
@@ -127,6 +128,10 @@ class Model(object):
             predictions = observed_pred.mean
 
         predictions = predictions.detach().numpy()
+
+        # NOTE: Why do we do the detach only for predictions?
+        gp_mean = gp_mean.detach().numpy()
+        gp_std = gp_std.detach().numpy()
 
         return predictions, gp_mean, gp_std
 
