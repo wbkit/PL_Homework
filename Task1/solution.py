@@ -378,12 +378,12 @@ def main():
     predicted_y = model.predict(test_x)
     print(predicted_y)
 
-    # Predict on the train features
-    print('Predicting on train features')
-    predicted_y = model.predict(train_x)[0]
-    print(predicted_y)
-
-    print(f"Cost function on train data: {cost_function(y_predicted=predicted_y, y_true=train_y)}")
+    # # Predict on the train features
+    # print('Predicting on train features')
+    # predicted_y = model.predict(train_x)[0]
+    # print(predicted_y)
+    #
+    # print(f"Cost function on train data: {cost_function(y_predicted=predicted_y, y_true=train_y)}")
 
     if EXTENDED_EVALUATION:
         perform_extended_evaluation(model, output_dir='..')
