@@ -176,7 +176,7 @@ class Model(object):
 
         print("\n")
 
-    def _optimize_parameters(self, n_searches, print_losses=True):
+    def _optimize_parameters(self, n_searches, plot_losses=True):
         parameter_grid = {
             "learning_rate": [0.1, 0.01],
         }
@@ -230,8 +230,8 @@ class Model(object):
 
             print("\n")
 
-            if print_losses:
-                self._print_losses(train_losses, val_losses, parameters)
+            if plot_losses:
+                self._plot_losses(train_losses, val_losses, parameters)
 
             if val_loss < best_val_loss:
                 best_parameters = parameters
@@ -257,7 +257,7 @@ class Model(object):
 
         return val_loss
 
-    def _print_losses(self, train_losses, val_losses, parameters):
+    def _plot_losses(self, train_losses, val_losses, parameters):
         plt.plot(train_losses, label='Train')
         plt.plot(val_losses, label='Validation')
         try:
