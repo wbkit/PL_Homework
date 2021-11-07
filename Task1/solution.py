@@ -22,7 +22,7 @@ DEFAULT_LEARNING_RATE = 0.1
 
 # Define if you want to optimize learning rate and number of epochs on a validation set
 OPTIMIZE_PARAMETERS = False
-N_SEARCHES_OPTIMIZATION = 2
+N_SEARCHES_OPTIMIZATION = 3
 MAX_ITERS_OPTIMIZATION = 1000
 EARLY_STOPPING_PATIENCE = 5
 
@@ -73,6 +73,7 @@ class GPModel(gpytorch.models.ExactGP):
 
         if base_covariance_function is None:
             base_covariance_function = gpytorch.kernels.RBFKernel()
+            #base_covariance_function = gpytorch.kernels.MaternKernel(nu=1.5) 
 
         grid_size = gpytorch.utils.grid.choose_grid_size(x)
 
@@ -128,10 +129,9 @@ class Model(object):
             predictions = observed_pred.mean
 
         predictions = predictions.detach().numpy()
-
-        # NOTE: Why do we do the detach only for predictions?
         gp_mean = gp_mean.detach().numpy()
         gp_std = gp_std.detach().numpy()
+        
 
         return predictions, gp_mean, gp_std
 
@@ -183,7 +183,7 @@ class Model(object):
 
     def _optimize_parameters(self, n_searches, plot_losses=True):
         parameter_grid = {
-            "learning_rate": [0.1, 0.01],
+            "learning_rate": [0.2, 0.1,  0.01],
         }
         param_list = list(ParameterSampler(parameter_grid, n_iter=n_searches, random_state=self.seed))
         train_x, val_x, train_y, val_y = train_test_split(self.train_x, self.train_y)
@@ -223,7 +223,7 @@ class Model(object):
 
                 val_loss = self._get_val_loss(model, likelihood, val_x, val_y)
 
-                train_losses.append(loss)
+                train_losses.append(loss.detach().numpy())
                 val_losses.append(val_loss)
 
                 if previous_val_loss < val_loss:
@@ -330,7 +330,7 @@ def perform_extended_evaluation(model: Model, output_dir: str = '/results'):
     gp_stddev = np.reshape(gp_stddev, (EVALUATION_GRID_POINTS, EVALUATION_GRID_POINTS))
 
     vmin, vmax = 0.0, 65.0
-    vmax_stddev = 35.5
+    vmax_stddev = 15 #35.5
 
     # Plot the actual predictions
     ax_predictions = fig.add_subplot(1, 3, 1)
