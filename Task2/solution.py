@@ -12,9 +12,11 @@ from tqdm import trange
 
 from util import ece, ParameterDistribution
 
+import math
+
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
 EXTENDED_EVALUATION = False
-
+DEVICE = torch.device("cpu")
 
 def run_solution(dataset_train: torch.utils.data.Dataset, data_dir: str = os.curdir, output_dir: str = '/results/') -> 'Model':
     """
@@ -56,7 +58,7 @@ class Model(object):
     def __init__(self):
         # Hyperparameters and general parameters
         # You might want to play around with those
-        self.num_epochs = 100  # number of training epochs
+        self.num_epochs = 20 #100  # number of training epochs
         self.batch_size = 128  # training batch size
         learning_rate = 1e-3  # training learning rates
         hidden_layers = (100, 100)  # for each entry, creates a hidden layer with the corresponding number of units
@@ -92,6 +94,8 @@ class Model(object):
 
         self.network.train()
 
+        NUM_BATCHES = 47
+
         progress_bar = trange(self.num_epochs)
         for _ in progress_bar:
             num_batches = len(train_loader)
@@ -117,7 +121,21 @@ class Model(object):
                     # BayesNet training step via Bayes by backprop
                     assert isinstance(self.network, BayesNet)
 
-                    # TODO: Implement Bayes by backprop training here
+                    # NOTE: Implement Bayes by backprop training here
+                    SAMPLES                     = 2
+                    current_logits              = torch.zeros(SAMPLES, self.batch_size, 10)
+                    log_priors                   = torch.zeros(SAMPLES)
+                    log_variational_posteriors   = torch.zeros(SAMPLES)
+
+                    for i in range(0,SAMPLES):
+                        current_logits[i], log_priors[i], log_variational_posteriors[i] = self.network(batch_x)
+                    log_prior = log_priors.mean()
+                    log_variational_posterior = log_variational_posteriors.mean()
+
+                    neg_log_likelihood = F.nll_loss(F.log_softmax(current_logits.mean(0), dim=1), batch_y, reduction='sum')
+                    loss = (log_variational_posterior - log_prior)/num_batches + neg_log_likelihood
+
+                    loss.backward()
 
                 self.optimizer.step()
 
@@ -174,16 +192,27 @@ class BayesianLayer(nn.Module):
         self.out_features = out_features
         self.use_bias = bias
 
-        # TODO: Create a suitable prior for weights and biases as an instance of ParameterDistribution.
+        # NOTE: Create a suitable prior for weights and biases as an instance of ParameterDistribution.
         #  You can use the same prior for both weights and biases, but are free to experiment with different priors.
         #  You can create constants using torch.tensor(...).
         #  Do NOT use torch.Parameter(...) here since the prior should not be optimized!
         #  Example: self.prior = MyPrior(torch.tensor(0.0), torch.tensor(1.0))
-        self.prior = None
-        assert isinstance(self.prior, ParameterDistribution)
-        assert not any(True for _ in self.prior.parameters()), 'Prior cannot have parameters'
 
-        # TODO: Create a suitable variational posterior for weights as an instance of ParameterDistribution.
+        # Prior distributions
+        PI = 0.5
+        SIGMA_1 = torch.Tensor([math.exp(-0)])
+        SIGMA_2 = torch.Tensor([math.exp(-6)])
+
+        self.weight_prior = ScaleMixtureGaussian(PI, SIGMA_1, SIGMA_2)
+        self.bias_prior = ScaleMixtureGaussian(PI, SIGMA_1, SIGMA_2)
+        self.log_prior = 0
+        self.log_variational_posterior = 0
+
+        # TODO: Adapt such that the assertions are met
+        # assert isinstance(self.prior, ParameterDistribution)
+        # assert not any(True for _ in self.prior.parameters()), 'Prior cannot have parameters'
+
+        # NOTE: Create a suitable variational posterior for weights as an instance of ParameterDistribution.
         #  You need to create separate ParameterDistribution instances for weights and biases,
         #  but can use the same family of distributions if you want.
         #  IMPORTANT: You need to create a nn.Parameter(...) for each parameter
@@ -193,17 +222,22 @@ class BayesianLayer(nn.Module):
         #      torch.nn.Parameter(torch.zeros((out_features, in_features))),
         #      torch.nn.Parameter(torch.ones((out_features, in_features)))
         #  )
-        self.weights_var_posterior = None
+        self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-0.2, 0.2))
+        self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-5,-4))
+        self.weight = Gaussian(self.weight_mu, self.weight_rho) # Input correct distribution
 
-        assert isinstance(self.weights_var_posterior, ParameterDistribution)
-        assert any(True for _ in self.weights_var_posterior.parameters()), 'Weight posterior must have parameters'
+        # TODO: Adapt such that the assertions are met
+        # assert isinstance(self.weights_var_posterior, ParameterDistribution)
+        # assert any(True for _ in self.weights_var_posterior.parameters()), 'Weight posterior must have parameters'
 
         if self.use_bias:
-            # TODO: As for the weights, create the bias variational posterior instance here.
-            #  Make sure to follow the same rules as for the weight variational posterior.
-            self.bias_var_posterior = None
-            assert isinstance(self.bias_var_posterior, ParameterDistribution)
-            assert any(True for _ in self.bias_var_posterior.parameters()), 'Bias posterior must have parameters'
+            self.bias_mu = nn.Parameter(torch.Tensor(out_features).uniform_(-0.2, 0.2))
+            self.bias_rho = nn.Parameter(torch.Tensor(out_features).uniform_(-5,-4))
+            self.bias = Gaussian(self.bias_mu, self.bias_rho) # Input correct distribution
+
+            # TODO: Adapt such that the assertions are met
+            # assert isinstance(self.bias_var_posterior, ParameterDistribution)
+            # assert any(True for _ in self.bias_var_posterior.parameters()), 'Bias posterior must have parameters'
         else:
             self.bias_var_posterior = None
 
@@ -225,11 +259,55 @@ class BayesianLayer(nn.Module):
         #  and if yes, include the bias as well.
         log_prior = torch.tensor(0.0)
         log_variational_posterior = torch.tensor(0.0)
-        weights = None
-        bias = None
+        
+        weights = self.weight.sample()     
+
+        log_prior = self.weight_prior.log_prob(weights) 
+        log_variational_posterior = self.weight.log_prob(weights) 
+
+        if self.bias is False:
+            bias = None
+        else:
+            bias = self.bias.sample()
+            log_prior = log_prior + self.bias_prior.log_prob(bias)
+            log_variational_posterior = log_variational_posterior + self.bias.log_prob(bias) 
 
         return F.linear(inputs, weights, bias), log_prior, log_variational_posterior
 
+# NOTE: For first implementation only
+class Gaussian(object):
+    def __init__(self, mu, rho):
+        super().__init__()
+        self.mu = mu
+        self.rho = rho
+        self.normal = torch.distributions.Normal(0,1)
+    
+    @property
+    def sigma(self):
+        return torch.log1p(torch.exp(self.rho))
+    
+    def sample(self):
+        epsilon = self.normal.sample(self.rho.size()).to(DEVICE)
+        return self.mu + self.sigma * epsilon
+    
+    def log_prob(self, input):
+        return (-math.log(math.sqrt(2 * math.pi))
+                - torch.log(self.sigma)
+                - ((input - self.mu) ** 2) / (2 * self.sigma ** 2)).sum()
+
+class ScaleMixtureGaussian(object):
+    def __init__(self, pi, sigma1, sigma2):
+        super().__init__()
+        self.pi = pi
+        self.sigma1 = sigma1
+        self.sigma2 = sigma2
+        self.gaussian1 = torch.distributions.Normal(0, torch.Tensor([sigma1]))
+        self.gaussian2 = torch.distributions.Normal(0, torch.Tensor([sigma2]))
+    
+    def log_prob(self, input):
+        prob1 = torch.exp(self.gaussian1.log_prob(input))
+        prob2 = torch.exp(self.gaussian2.log_prob(input))
+        return (torch.log(self.pi * prob1 + (1-self.pi) * prob2)).sum()
 
 class BayesNet(nn.Module):
     """
@@ -268,13 +346,23 @@ class BayesNet(nn.Module):
             iii) sample of the log-variational-posterior probability
         """
 
-        # TODO: Perform a full pass through your BayesNet as described in this method's docstring.
+        # NOTE: Perform a full pass through your BayesNet as described in this method's docstring.
         #  You can look at DenseNet to get an idea how a forward pass might look like.
         #  Don't forget to apply your activation function in between BayesianLayers!
         log_prior = torch.tensor(0.0)
         log_variational_posterior = torch.tensor(0.0)
-        output_features = None
+        current_features = x
 
+        # NOTE: Log prior etc. need to be processed differently
+        for idx, current_layer in enumerate(self.layers):
+            new_features, new_log_prior, new_log_posterior = current_layer(current_features)
+            if idx < len(self.layers) - 1:
+                new_features = self.activation(new_features)
+            current_features = new_features
+            log_prior = log_prior + new_log_prior
+            log_variational_posterior = log_variational_posterior + new_log_posterior
+        output_features = current_features
+    
         return output_features, log_prior, log_variational_posterior
 
     def predict_probabilities(self, x: torch.Tensor, num_mc_samples: int = 10) -> torch.Tensor:
@@ -525,11 +613,11 @@ class DenseNet(nn.Module):
 
 
 def main():
-    raise RuntimeError(
-        'This main method is for illustrative purposes only and will NEVER be called by the checker!\n'
-        'The checker always calls run_solution directly.\n'
-        'Please implement your solution exclusively in the methods and classes mentioned in the task description.'
-    )
+    # raise RuntimeError(
+    #     'This main method is for illustrative purposes only and will NEVER be called by the checker!\n'
+    #     'The checker always calls run_solution directly.\n'
+    #     'Please implement your solution exclusively in the methods and classes mentioned in the task description.'
+    # )
 
     # Load training data
     data_dir = os.curdir
