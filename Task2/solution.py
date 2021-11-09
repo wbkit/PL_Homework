@@ -16,7 +16,7 @@ import math
 
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
 EXTENDED_EVALUATION = False
-DEVICE = torch.device("cpu")
+# DEVICE = torch.device("cpu")
 
 def run_solution(dataset_train: torch.utils.data.Dataset, data_dir: str = os.curdir, output_dir: str = '/results/') -> 'Model':
     """
@@ -58,10 +58,10 @@ class Model(object):
     def __init__(self):
         # Hyperparameters and general parameters
         # You might want to play around with those
-        self.num_epochs = 20 #100  # number of training epochs
-        self.batch_size = 128  # training batch size
+        self.num_epochs = 50  # number of training epochs
+        self.batch_size = 256  # training batch size (initially 128)
         learning_rate = 1e-3  # training learning rates
-        hidden_layers = (100, 100)  # for each entry, creates a hidden layer with the corresponding number of units
+        hidden_layers = (200, 100)  # for each entry, creates a hidden layer with the corresponding number of units
         use_densenet = False  # set this to True in order to run a DenseNet for comparison
         self.print_interval = 100  # number of batches until updated metrics are displayed during training
 
@@ -93,8 +93,6 @@ class Model(object):
         )
 
         self.network.train()
-
-        NUM_BATCHES = 47
 
         progress_bar = trange(self.num_epochs)
         for _ in progress_bar:
@@ -199,9 +197,9 @@ class BayesianLayer(nn.Module):
         #  Example: self.prior = MyPrior(torch.tensor(0.0), torch.tensor(1.0))
 
         # Prior distributions
-        PI = 0.5
-        SIGMA_1 = torch.Tensor([math.exp(-0)])
-        SIGMA_2 = torch.Tensor([math.exp(-6)])
+        PI = 0.1
+        SIGMA_1 = torch.Tensor([math.exp(-0)]) # 0
+        SIGMA_2 = torch.Tensor([math.exp(-6)]) # 6
 
         self.weight_prior = ScaleMixtureGaussian(PI, SIGMA_1, SIGMA_2)
         self.bias_prior = ScaleMixtureGaussian(PI, SIGMA_1, SIGMA_2)
@@ -287,7 +285,7 @@ class Gaussian(object):
         return torch.log1p(torch.exp(self.rho))
     
     def sample(self):
-        epsilon = self.normal.sample(self.rho.size()).to(DEVICE)
+        epsilon = self.normal.sample(self.rho.size()) #.to(DEVICE)
         return self.mu + self.sigma * epsilon
     
     def log_prob(self, input):
