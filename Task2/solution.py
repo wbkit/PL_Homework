@@ -67,7 +67,7 @@ class Model(object):
     def __init__(self):
         # Hyperparameters and general parameters
         # You might want to play around with those
-        self.num_epochs = 50  # number of training epochs
+        self.num_epochs = 100  # number of training epochs
         self.batch_size = 256  # training batch size (initially 128)
         learning_rate = 1e-3  # training learning rates
         hidden_layers = (200, 100)  # for each entry, creates a hidden layer with the corresponding number of units
@@ -212,7 +212,6 @@ class BayesianLayer(nn.Module):
         self.log_prior = 0
         self.log_variational_posterior = 0
 
-        # TODO: Adapt such that the assertions are met
         assert isinstance(self.weight_prior, ParameterDistribution) \
                and isinstance(self.bias_prior, ParameterDistribution)
         assert not any(True for _ in self.weight_prior.parameters()), 'Prior cannot have parameters'
@@ -232,7 +231,6 @@ class BayesianLayer(nn.Module):
         self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-5, -4))
         self.weights_var_posterior = MultivariateDiagonalGaussian(self.weight_mu, self.weight_rho)
 
-        # TODO: Adapt such that the assertions are met
         assert isinstance(self.weights_var_posterior, ParameterDistribution)
         assert any(True for _ in self.weights_var_posterior.parameters()), 'Weight posterior must have parameters'
 
@@ -241,7 +239,6 @@ class BayesianLayer(nn.Module):
             self.bias_rho = nn.Parameter(torch.Tensor(out_features).uniform_(-5, -4))
             self.bias_var_posterior = MultivariateDiagonalGaussian(self.bias_mu, self.bias_rho)
 
-            # TODO: Adapt such that the assertions are met
             assert isinstance(self.bias_var_posterior, ParameterDistribution)
             assert any(True for _ in self.bias_var_posterior.parameters()), 'Bias posterior must have parameters'
         else:
