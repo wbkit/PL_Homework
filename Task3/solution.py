@@ -7,8 +7,11 @@ from scipy.optimize import fmin_l_bfgs_b
 import matplotlib.pyplot as plt
 
 
-import torch
-import gpytorch
+#import torch
+#import gpytorch
+
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
 
 
 from scipy.stats import norm
@@ -20,18 +23,18 @@ EXTENDED_EVALUATION = False
 """ Solution """
 
 
-#custom GP model, partially taken from Demo code
-class GP(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, kernel):
-        super().__init__(train_x, train_y, likelihood=gpytorch.likelihoods.GaussianLikelihood())
-        self.mean_module = gpytorch.means.ZeroMean()
-        self.covar_module = kernel
-
-    def forward(self, x):
-        """Forward computation of GP."""
-        mean_x = self.mean_module(x)
-        covar_x = self.covar_module(x)
-        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+##custom GP model, partially taken from Demo code
+#class GP(gpytorch.models.ExactGP):
+#    def __init__(self, train_x, train_y, kernel):
+#        super().__init__(train_x, train_y, likelihood=gpytorch.likelihoods.GaussianLikelihood())
+#        self.mean_module = gpytorch.means.ZeroMean()
+#        self.covar_module = kernel
+#
+#    def forward(self, x):
+#        """Forward computation of GP."""
+#        mean_x = self.mean_module(x)
+#        covar_x = self.covar_module(x)
+#        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
     
 
 
@@ -116,35 +119,20 @@ class BO_algo(object):
 
         # TODO: enter your code here
 #        raise NotImplementedError
+       
         
-        #will use EI 
-        with torch.no_grad(), gpytorch.settings.fast_pred_var():
-            f_pred = self.objective_model(torch.Tensor(x[None,:]))  #darn it... 
-            f_mean = f_pred.mean
-            f_cov = f_pred.covariance_matrix
-            
-            c_pred = self.constraint_model(torch.Tensor(x[None,:]))
-            c_mean = c_pred.mean
-            c_cov = c_pred.covariance_matrix
-#            print('c_mean', c_mean)
-#            print('c_cov', c_cov)
-        
-        f_std = np.sqrt(f_cov)
-        gamma = (self.current_best_f - f_mean) / f_std
-        
-        EI = f_std * (gamma * norm().cdf(gamma)) + norm().pdf(gamma)
-        
+        #will use EI*P(C)
+        f_mean, f_std = self.objective_model.predict(x[None,:], return_std=True)
+        c_mean, c_std = self.constraint_model.predict(x[None,:], return_std=True)
 
-        #get the prob. of satisfy constraint
-        c_std = np.sqrt(c_cov)
-        p_sat= norm(loc = c_mean, scale = c_std).cdf(LAMBDA)
         
-        #according to paper
-        a_x = np.asarray(EI*p_sat)[0,:]
-#        print(a_x.shape)
+        gamma = (self.current_best_f - f_mean) / f_std
+        EI = f_std * (gamma * norm().cdf(gamma)) + norm().pdf(gamma)
+        p_sat= norm(loc = c_mean, scale = c_std).cdf(LAMBDA)
+        a_x = np.asarray(EI*p_sat)
+
         
         return a_x
-        
         
 
     def add_data_point(self, x: np.ndarray, z: float, c: float):
@@ -166,58 +154,44 @@ class BO_algo(object):
 
         # TODO: enter your code here
         
-        data = torch.Tensor(self.previous_points)
-#        print(data.shape)
-#        print(data[:,0:2].shape)
-#        print(data[:,2].shape)
-        
+        #change to np for easier slicing
+        data = np.asarray(self.previous_points)
+        X = data[:,0:2]
+        y = data[:,2]
+        c = data[:,3]
+
         #if new, we need to initialize the models
-        if self.new: 
-            #build objective model 
-            base_kernel_f = []
-            base_kernel_f.append(gpytorch.kernels.LinearKernel(lengthscale_prior=1.5))        
-            base_kernel_f.append(gpytorch.kernels.RBFKernel(variance=1.5))
-            f_kernel = gpytorch.kernels.ProductKernel(*base_kernel_f)
-            self.objective_model = GP(data[:,0:2], data[:,2], f_kernel)
+        if self.new:        
+            #we are given lengthscales so we are not supposed to tune them, set bounds to fixed
+            #noise are implemented with WhiteKernel
+            f_kernel = ConstantKernel(constant_value=1.5, constant_value_bounds="fixed") * RBF(length_scale=1.5, length_scale_bounds="fixed") + WhiteKernel(noise_level=0.01**2)
+            self.objective_model = GaussianProcessRegressor(kernel=f_kernel)
+            self.objective_model.fit(X, y)  #i believe this step is for hyperparam tuning, but I will include it anyway
             
-            
-            #build the constraint model
-            base_kernel_c = []
-            base_kernel_c.append(gpytorch.kernels.LinearKernel(lengthscale_prior=3.5))        
-            base_kernel_c.append(gpytorch.kernels.RBFKernel(variance=2))
-            c_kernel = gpytorch.kernels.ProductKernel(*base_kernel_c)
-            self.constraint_model = GP(data[:,0:2], data[:,3], c_kernel)
+            c_kernel = ConstantKernel(constant_value=3.5, constant_value_bounds="fixed") * RBF(length_scale=2, length_scale_bounds="fixed") + WhiteKernel(noise_level=0.005**2)
+            self.constraint_model = GaussianProcessRegressor(kernel=c_kernel)
+            self.constraint_model.fit(X, c)
             
             self.new = False
         
-        #else we update the data
-        ######################not sure: set_train_data or get_fantasy_model; 
-        #will use the set_train_data, and the rest will be the same
-        else:            
-            self.objective_model.set_train_data(data[:,0:2], data[:,2], strict = False)
-            self.constraint_model.set_train_data(data[:,0:2], data[:,3], strict = False)
-
-        
-        ##############probably don't need to train, we only need the covariance etc.
-        #if I understand correctly, train is to find hperparam. 
-        #then we fit the models
-        self.objective_model.eval()
-        self.constraint_model.eval()
-        
+        #else we update the model with new data
+        else:    #update data           
+            self.objective_model.fit(X, y)
+            self.constraint_model.fit(X, c)
+            
+    
         
         #update the max fxn value
-        #sanity check
-        feasible_idx = data[:,2] <= LAMBDA
-#        print(feasible_idx)
-        feasible_y = data[:,2][feasible_idx]
-#        print(feasible_y)
-        
-#        if len(feasible_y) != len(data[:,2]):
-#            print('sanity check failed')
+        feasible_idx = c <= LAMBDA
+        feasible_y = y[feasible_idx]
         if len(feasible_y) > 0:
-            self.current_best_f = feasible_y.min()
-#        else:   
-#            print('all tries failed!!!!')
+            self.current_best_f = feasible_y.max()
+        
+        #all violating, just pick the max; this should only happen in the first few iteration
+        #later the algorithm should only fall into the "if" case
+        else:   
+            self.current_best_f = y.max()
+
 
         
 #        raise NotImplementedError
@@ -233,12 +207,12 @@ class BO_algo(object):
         """
 
         # TODO: enter your code here
-        data_np = np.asarray(self.previous_points)
+        data_np = np.asarray(self.previous_points)  #for easier slicing
         x_np = data_np[:,0:2]
         y_np = data_np[:,2]
-#        for i in range(len(y_np))
+        c_np = data_np[:,3]
         
-        feasible_idx = y_np <= LAMBDA
+        feasible_idx = c_np <= LAMBDA
         feasible_y = y_np[feasible_idx]
         feasible_x = x_np[feasible_idx]       
         sol_index = feasible_y.argmin()
