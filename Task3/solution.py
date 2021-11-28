@@ -7,9 +7,6 @@ from scipy.optimize import fmin_l_bfgs_b
 import matplotlib.pyplot as plt
 
 
-#import torch
-#import gpytorch
-
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
 
@@ -21,21 +18,7 @@ EXTENDED_EVALUATION = False
 
 
 """ Solution """
-
-
-##custom GP model, partially taken from Demo code
-#class GP(gpytorch.models.ExactGP):
-#    def __init__(self, train_x, train_y, kernel):
-#        super().__init__(train_x, train_y, likelihood=gpytorch.likelihoods.GaussianLikelihood())
-#        self.mean_module = gpytorch.means.ZeroMean()
-#        self.covar_module = kernel
-#
-#    def forward(self, x):
-#        """Forward computation of GP."""
-#        mean_x = self.mean_module(x)
-#        covar_x = self.covar_module(x)
-#        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
-    
+   
 
 
 class BO_algo(object):
@@ -165,11 +148,11 @@ class BO_algo(object):
             #we are given lengthscales so we are not supposed to tune them, set bounds to fixed
             #noise are implemented with WhiteKernel
             f_kernel = ConstantKernel(constant_value=1.5, constant_value_bounds="fixed") * RBF(length_scale=1.5, length_scale_bounds="fixed") + WhiteKernel(noise_level=0.01**2)
-            self.objective_model = GaussianProcessRegressor(kernel=f_kernel)
+            self.objective_model = GaussianProcessRegressor(kernel=f_kernel, optimizer=None)
             self.objective_model.fit(X, y)  #i believe this step is for hyperparam tuning, but I will include it anyway
             
             c_kernel = ConstantKernel(constant_value=3.5, constant_value_bounds="fixed") * RBF(length_scale=2, length_scale_bounds="fixed") + WhiteKernel(noise_level=0.005**2)
-            self.constraint_model = GaussianProcessRegressor(kernel=c_kernel)
+            self.constraint_model = GaussianProcessRegressor(kernel=c_kernel, optimizer=None)
             self.constraint_model.fit(X, c)
             
             self.new = False
