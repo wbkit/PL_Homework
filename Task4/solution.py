@@ -1,8 +1,6 @@
+import time
 import numpy as np
 import matplotlib.pyplot as plt
-
-import time
-
 import scipy.signal
 from gym.spaces import Box, Discrete
 
@@ -10,6 +8,7 @@ import torch
 from torch.optim import Adam
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
+
 
 def discount_cumsum(x, discount):
     """
@@ -20,18 +19,20 @@ def discount_cumsum(x, discount):
     """
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
+
 def combined_shape(length, shape=None):
     """Helper function that combines two array shapes."""
     if shape is None:
         return (length,)
     return (length, shape) if np.isscalar(shape) else (length, *shape)
 
+
 def mlp(sizes, activation, output_activation=nn.Identity):
     """The basic multilayer perceptron architecture used."""
     layers = []
-    for j in range(len(sizes)-1):
-        act = activation if j < len(sizes)-2 else output_activation
-        layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
+    for j in range(len(sizes) - 1):
+        act = activation if j < len(sizes) - 2 else output_activation
+        layers += [nn.Linear(sizes[j], sizes[j + 1]), act()]
     return nn.Sequential(*layers)
 
 
@@ -68,6 +69,7 @@ class MLPCategoricalActor(nn.Module):
 
 class MLPCritic(nn.Module):
     """The network used by the value function."""
+
     def __init__(self, obs_dim, hidden_sizes, activation):
         super().__init__()
         self.v_net = mlp([obs_dim] + list(hidden_sizes) + [1], activation)
@@ -77,12 +79,11 @@ class MLPCritic(nn.Module):
         return torch.squeeze(self.v_net(obs), -1)
 
 
-
 class MLPActorCritic(nn.Module):
     """Class to combine policy (actor) and value (critic) function neural networks."""
 
     def __init__(self,
-                 hidden_sizes=(64,64), activation=nn.Tanh):
+                 hidden_sizes=(64, 64), activation=nn.Tanh):
         super().__init__()
 
         obs_dim = 8
@@ -91,27 +92,40 @@ class MLPActorCritic(nn.Module):
         self.pi = MLPCategoricalActor(obs_dim, 4, hidden_sizes, activation)
 
         # Build value function
-        self.v  = MLPCritic(obs_dim, hidden_sizes, activation)
+        self.v = MLPCritic(obs_dim, hidden_sizes, activation)
 
     def step(self, state):
         """
         Take a state and return an action, value function, and log-likelihood
         of chosen action.
         """
-        # TODO1: Implement this function.
+        # TODO: Implement this function.
         # It is supposed to return three numbers:
         #    1. An action sampled from the policy given a state (0, 1, 2 or 3)
         #    2. The value function at the given state
         #    3. The log-probability of the action under the policy output distribution
         # Hint: This function is only called when interacting with the environment. You should use
         # `torch.no_grad` to ensure that it does not interfere with the gradient computation.
-        return 0, 0, 0
+
+        with torch.no_grad():
+            # Get distribution over actions and sample from it
+            pi, _ = self.pi(obs=state)
+            action = pi.sample()
+
+            # Compute the likelihood of the sampled action
+            pi, logp_a = self.pi(obs=state, act=action)
+
+            # Compute the value function at the given state
+            value = self.v(obs=state)
+
+        return action, value, logp_a
 
 
 class VPGBuffer:
     """
     Buffer to store trajectories.
     """
+
     def __init__(self, obs_dim, act_dim, size, gamma, lam):
         self.obs_buf = np.zeros(combined_shape(size, obs_dim), dtype=np.float32)
         self.act_buf = np.zeros(combined_shape(size, act_dim), dtype=np.float32)
@@ -152,22 +166,21 @@ class VPGBuffer:
         rews = np.append(self.rew_buf[path_slice], last_val)
         vals = np.append(self.val_buf[path_slice], last_val)
 
-        # TODO6: Implement computation of phi.
-        
-        # Hint: For estimating the advantage function to use as phi, equation 
-        # 16 in the GAE paper (see task description) will be helpful, and so will
-        # the discout_cumsum function at the top of this file. 
-        
-        # deltas = rews[:-1] + ...
-        # self.phi_buf[path_slice] =
+        # TODO: Implement computation of phi.
 
-        #TODO4: currently the return is the total discounted reward for the whole episode. 
+        # Hint: For estimating the advantage function to use as phi, equation
+        # 16 in the GAE paper (see task description) will be helpful, and so will
+        # the discout_cumsum function at the top of this file.
+        deltas = rews + self.gamma * vals - last_val
+        self.phi_buf[path_slice] = discount_cumsum(x=deltas, discount=self.lam * self.gamma)[:-1]
+
+        # TODO: currently the return is the total discounted reward for the whole episode.
         # Replace this by computing the reward-to-go for each timepoint.
         # Hint: use the discount_cumsum function.
-        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[0] * np.ones(self.ptr-self.path_start_idx)
+        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma) - discount_cumsum(rews[:self.ptr], self.gamma) \
+                                   * np.ones(self.ptr - self.path_start_idx)
 
         self.path_start_idx = self.ptr
-
 
     def get(self):
         """
@@ -177,12 +190,12 @@ class VPGBuffer:
         assert self.ptr == self.max_size
         self.ptr, self.path_start_idx = 0, 0
 
-        # TODO7: Here it may help to normalize the values in self.phi_buf
-        self.phi_buf = self.phi_buf
+        # TODO: Here it may help to normalize the values in self.phi_buf
+        self.phi_buf = (self.phi_buf - self.phi_buf.mean()) / (self.phi_buf.std())
 
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                     phi=self.phi_buf, logp=self.logp_buf)
-        return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in data.items()}
+        return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
 
 
 class Agent:
@@ -191,7 +204,7 @@ class Agent:
         self.hid = 64  # layer width of networks
         self.l = 2  # layer number of networks
         # initialises an actor critic
-        self.ac = MLPActorCritic(hidden_sizes=[self.hid]*self.l)
+        self.ac = MLPActorCritic(hidden_sizes=[self.hid] * self.l)
 
         # Learning rates for policy and value function
         pi_lr = 3e-3
@@ -205,8 +218,8 @@ class Agent:
         """
         Use the data from the buffer to update the policy. Returns nothing.
         """
-        #TODO2: Implement this function. 
-        #TODO8: Change the update rule to make use of the baseline instead of rewards-to-go.
+        # TODO : Implement this function.
+        # TODO : Change the update rule to make use of the baseline instead of rewards-to-go.
 
         obs = data['obs']
         act = data['act']
@@ -216,8 +229,15 @@ class Agent:
         # Before doing any computation, always call.zero_grad on the relevant optimizer
         self.pi_optimizer.zero_grad()
 
-        #Hint: you need to compute a 'loss' such that its derivative with respect to the policy
-        #parameters is the policy gradient. Then call loss.backwards() and pi_optimizer.step()
+        # Hint: you need to compute a 'loss' such that its derivative with respect to the policy
+        # parameters is the policy gradient. Then call loss.backwards() and pi_optimizer.step()
+
+        expected_return = phi
+        log_p = None
+
+        loss = - torch.sum(log_p) * torch.sum(expected_return)
+        loss.backwards()
+        self.pi_optimizer.step()
 
         return
 
@@ -225,7 +245,7 @@ class Agent:
         """
         Use the data from the buffer to update the value function. Returns nothing.
         """
-        #TODO5: Implement this function
+        # TODO: Implement this function
 
         obs = data['obs']
         act = data['act']
@@ -233,8 +253,8 @@ class Agent:
         ret = data['ret']
 
         # Hint: it often works well to do multiple rounds of value function updates per epoch.
-        # With the learning rate given, we'd recommend 100. 
-        # In each update, compute a loss for the value function, call loss.backwards() and 
+        # With the learning rate given, we'd recommend 100.
+        # In each update, compute a loss for the value function, call loss.backwards() and
         # then v_optimizer.step()
         # Before doing any computation, always call.zero_grad on the relevant optimizer
         self.v_optimizer.zero_grad()
@@ -307,8 +327,8 @@ class Agent:
 
             mean_return = np.mean(ep_returns) if len(ep_returns) > 0 else np.nan
             if len(ep_returns) == 0:
-                print(f"Epoch: {epoch+1}/{epochs}, all episodes exceeded max_ep_len")
-            print(f"Epoch: {epoch+1}/{epochs}, mean return {mean_return}")
+                print(f"Epoch: {epoch + 1}/{epochs}, all episodes exceeded max_ep_len")
+            print(f"Epoch: {epoch + 1}/{epochs}, mean return {mean_return}")
 
             # This is the end of an epoch, so here is where we update the policy and value function
 
@@ -317,9 +337,7 @@ class Agent:
             self.pi_update(data)
             self.v_update(data)
 
-
         return True
-
 
     def get_action(self, obs):
         """
@@ -327,10 +345,10 @@ class Agent:
 
         IMPORTANT: This function is called by the checker to evaluate your agent.
         You SHOULD NOT change the arguments this function takes and what it outputs!
-        It is not used in your own training code. Instead the .step function in 
-        MLPActorCritic is used since it also outputs relevant side-information. 
+        It is not used in your own training code. Instead the .step function in
+        MLPActorCritic is used since it also outputs relevant side-information.
         """
-        # TODO3: Implement this function.
+        # TODO: Implement this function.
         # Currently, this just returns a random action.
         return np.random.choice([0, 1, 2, 3])
 
@@ -357,7 +375,7 @@ def main():
     print("Evaluating agent...")
 
     for i in range(n_eval):
-        print(f"Testing policy: episode {i+1}/{n_eval}")
+        print(f"Testing policy: episode {i + 1}/{n_eval}")
         state = env.reset()
         cumulative_return = 0
         # The environment will set terminal to True if an episode is done.
@@ -379,6 +397,7 @@ def main():
             print("Saved video of 10 episodes to 'policy.mp4'.")
     env.close()
     print(f"Average return: {np.mean(returns):.2f}")
+
 
 if __name__ == "__main__":
     main()
