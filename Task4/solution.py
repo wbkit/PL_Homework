@@ -178,7 +178,7 @@ class VPGBuffer:
         # TODO4: currently the return is the total discounted reward for the whole episode.
         # Replace this by computing the reward-to-go for each timepoint.
         # Hint: use the discount_cumsum function.
-        rewards_to_go = self._compute_reward_to_go(rews)
+        # rewards_to_go = self._compute_reward_to_go(rews)
         # self.ret_buf[path_slice] = discount_cumsum(rewards_to_go, self.gamma)[0] * np.ones(self.ptr -
         #                            self.path_start_idx)
 
@@ -389,8 +389,8 @@ def main():
     agent.train()
 
     rec = VideoRecorder(env, "policy.mp4")
-    episode_length = 5
-    n_eval = 2
+    episode_length = 300
+    n_eval = 100
     returns = []
     print("Evaluating agent...")
 
