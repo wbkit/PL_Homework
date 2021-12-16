@@ -166,21 +166,33 @@ class VPGBuffer:
         rews = np.append(self.rew_buf[path_slice], last_val)
         vals = np.append(self.val_buf[path_slice], last_val)
 
-        # TODO: Implement computation of phi.
+        # TODO6: Implement computation of phi.
 
         # Hint: For estimating the advantage function to use as phi, equation
         # 16 in the GAE paper (see task description) will be helpful, and so will
         # the discout_cumsum function at the top of this file.
-        deltas = rews + self.gamma * vals - last_val
-        self.phi_buf[path_slice] = discount_cumsum(x=deltas, discount=self.lam * self.gamma)[:-1]
 
-        # TODO: currently the return is the total discounted reward for the whole episode.
+        deltas = rews[:-1] + (self.gamma * np.roll(vals, shift=-1) - vals)[:-1]
+        self.phi_buf[path_slice] = discount_cumsum(x=deltas, discount=(self.gamma*self.lam))
+
+        # TODO4: currently the return is the total discounted reward for the whole episode.
         # Replace this by computing the reward-to-go for each timepoint.
         # Hint: use the discount_cumsum function.
-        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma) - discount_cumsum(rews[:self.ptr], self.gamma) \
-                                   * np.ones(self.ptr - self.path_start_idx)
+        rewards_to_go = self._compute_reward_to_go(rews)
+        # self.ret_buf[path_slice] = discount_cumsum(rewards_to_go, self.gamma)[0] * np.ones(self.ptr -
+        #                            self.path_start_idx)
+
+        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1] * np.ones(self.ptr - self.path_start_idx)
+
 
         self.path_start_idx = self.ptr
+
+    def _compute_reward_to_go(self, rews):
+        n = len(rews)
+        rewards_to_go = np.zeros_like(rews)
+        for i in reversed(range(n)):
+            rewards_to_go[i] = rews[i] + (rewards_to_go[i + 1] if i + 1 < n else 0)
+        return rewards_to_go
 
     def get(self):
         """
@@ -221,10 +233,11 @@ class Agent:
         # TODO : Implement this function.
         # TODO : Change the update rule to make use of the baseline instead of rewards-to-go.
 
-        obs = data['obs']
-        act = data['act']
-        phi = data['phi']
-        ret = data['ret']
+        obs = data['obs'] # State
+        act = data['act'] # Action
+        phi = data['phi'] # Advantage function
+        ret = data['ret'] # Return
+        logp = data["logp"] # Log prob
 
         # Before doing any computation, always call.zero_grad on the relevant optimizer
         self.pi_optimizer.zero_grad()
@@ -232,10 +245,10 @@ class Agent:
         # Hint: you need to compute a 'loss' such that its derivative with respect to the policy
         # parameters is the policy gradient. Then call loss.backwards() and pi_optimizer.step()
 
-        expected_return = phi
-        log_p = None
+        # Policy loss
+        pi, logp_new = self.ac.pi(obs, act)
+        loss = -(logp_new * phi).mean()
 
-        loss = - torch.sum(log_p) * torch.sum(expected_return)
         loss.backwards()
         self.pi_optimizer.step()
 
@@ -258,6 +271,12 @@ class Agent:
         # then v_optimizer.step()
         # Before doing any computation, always call.zero_grad on the relevant optimizer
         self.v_optimizer.zero_grad()
+
+        # Value loss = (V_new(x) - V_old(x))^2
+        loss = ((self.ac.v(obs) - ret)**2).mean()
+        loss.backwards()
+
+        self.v_optimizer.step()
 
         return
 
@@ -350,7 +369,8 @@ class Agent:
         """
         # TODO: Implement this function.
         # Currently, this just returns a random action.
-        return np.random.choice([0, 1, 2, 3])
+        # return np.random.choice([0, 1, 2, 3])
+        return self.ac.step(obs)
 
 
 def main():
@@ -369,8 +389,8 @@ def main():
     agent.train()
 
     rec = VideoRecorder(env, "policy.mp4")
-    episode_length = 300
-    n_eval = 100
+    episode_length = 5
+    n_eval = 2
     returns = []
     print("Evaluating agent...")
 
